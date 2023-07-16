@@ -2,11 +2,16 @@ import sqlite3
 import telebot
 from config import settings
 import datetime as DT
+import logging as log
 
 from db import BotDB
 BotDB_serials = BotDB('D:\.Working\Programming\SerialListener_bot\Databases\serials.db')
 BotDB_bank = BotDB('Databases\\bank.db')
 banker = settings['banker']
+
+date = DT.datetime.date(DT.datetime.now())
+log.basicConfig(level=log.INFO, filename=f"transfer_history/{date}.log", filemode="a",
+				format="%(asctime)s| %(message)s")
 
 bot = telebot.TeleBot(settings['token'])
 
@@ -91,15 +96,15 @@ def transfer_money(message):
 	user_name = str(get_user.first_name)
 	amount = int(msg.split()[1])
 
-	balance_of_sender = BotDB_bank.get_balance_by_id(user_id)
-	balance_of_receiving = BotDB_bank.get_balance_by_id(user_id)
-
 	bank_number_of_receiving = str(msg.split()[2])
 	bank_number_of_sender = BotDB_bank.get_bank_number_by_id(user_id)
 	user_name_of_receiving = BotDB_bank.get_name_by_bank_number(bank_number_of_receiving)
-
 	user_id_of_receiving = BotDB_bank.get_id_by_bank_number(bank_number_of_receiving)
-	if user_id != user_id_of_receiving and amount <= balance_of_sender and balance_of_sender > 0:
+
+	balance_of_receiving = BotDB_bank.get_balance_by_id(user_id_of_receiving)
+	balance_of_sender = BotDB_bank.get_balance_by_id(user_id)
+
+	if user_id != user_id_of_receiving and amount <= balance_of_sender and balance_of_sender > 0 and amount > 0:
 		BotDB_bank.transfer_money(user_id, user_id_of_receiving, amount, balance_of_sender, balance_of_receiving)
 		bot.send_message(message.chat.id, f'Успешно переведено {amount} марок!\n'
 										  f'Итого: {balance_of_sender - amount}\n'
@@ -107,6 +112,9 @@ def transfer_money(message):
 		bot.send_message(user_id_of_receiving, f'Вам перевели {amount} марок!\n'
 											   f'Итого: {amount + balance_of_receiving}\n'
 											   f'Отправитель: {user_name}, {bank_number_of_sender}')
+		log.info(f"\nПеревод: {amount} \n"
+				 f"Отправитель: {user_name}, {bank_number_of_sender},\n"
+				 f"Получатель: {user_name_of_receiving}, {bank_number_of_receiving}\n")
 	else:
 		bot.send_message(message.chat.id, 'Не удалось. Возможные причины:\n'
 										  ' • Вы отправили деньги сами себе'
@@ -133,6 +141,8 @@ def return_money(message):
 								  f'Было в банке: {bank_balance}\n'
 								  f'Стало в банке: {bank_balance + amount} гарм. марок\n'
 								  f'Вернувший: {user_name}, {user_bank_number}')
+		log.info(f"\nВозврат в банк: {amount} \n"
+				 f"Отправитель: {user_name}, {user_bank_number}\n")
 	else:
 		bot.send_message(message.chat.id, 'Не удалось. Возможные причины:\n'
 										  ' • Кол-во отправленных денег больше имеющихся'
@@ -146,10 +156,15 @@ def print_money(message):
 	if user_id == banker:
 		amount = int(msg.split()[1])
 		balance = BotDB_bank.get_bank_balance()
-		BotDB_bank.add_bank_money(amount, balance)
-		bot.send_message(message.chat.id, f'Успешно напечатано {amount} марок!\n'
-										  f'Было: {balance}\n'
-										  f'Итого: {balance + amount} гарм. марок')
+		if amount > 0:
+			BotDB_bank.add_bank_money(amount, balance)
+			bot.send_message(message.chat.id, f'Успешно напечатано {amount} марок!\n'
+											  f'Было: {balance}\n'
+											  f'Итого: {balance + amount} гарм. марок')
+			log.info(f"\nНапечатано: {amount}\n"
+					 f"Всего теперь: {balance + amount}\n")
+		else:
+			bot.send_message(message.chat.id, 'Введено отрицательное количество, или ноль.')
 	else: pass
 
 @bot.message_handler(commands=['сжечь', 'Сжечь', 'с'])
@@ -160,10 +175,15 @@ def burn_money(message):
 	if user_id == banker:
 		amount = int(msg.split()[1])
 		balance = BotDB_bank.get_bank_balance()
-		BotDB_bank.burn_bank_money(amount, balance)
-		bot.send_message(message.chat.id, f'Успешно сожжено {amount} марок!\n'
-										  f'Было: {balance}\n'
-										  f'Итого: {balance - amount} гарм. марок')
+		if amount > 0 and balance > 0 and amount <= balance:
+			BotDB_bank.burn_bank_money(amount, balance)
+			bot.send_message(message.chat.id, f'Успешно сожжено {amount} марок!\n'
+											  f'Было: {balance}\n'
+											  f'Итого: {balance - amount} гарм. марок')
+			log.info(f"\nСожжено в банке: {amount} \n"
+					 f"Всего теперь: {balance}\n")
+		else:
+			bot.send_message(message.chat.id, 'Ошибка, количество < 1, баланс <= 0 или количество > баланса')
 	else: pass
 
 @bot.message_handler(commands=['банк', 'Банк', 'б'])
@@ -189,7 +209,7 @@ def give_money(message):
 		user_balance = BotDB_bank.get_balance_by_id(user_id)
 		user_name = BotDB_bank.get_name_by_bank_number(bank_number)
 
-		if bank_balance > 0 and amount <= bank_balance:
+		if bank_balance > 0 and amount <= bank_balance and amount > 0:
 			BotDB_bank.give_bank_money(amount, bank_balance, user_id, user_balance)
 			bot.send_message(message.chat.id, f'Успешно передано {amount} марок!\n'
 											  f'Было в банке: {bank_balance}\n'
@@ -197,10 +217,23 @@ def give_money(message):
 											  f'Было у {user_name}, {bank_number}: {user_balance}\n'
 											  f'Стало у {user_name}, {bank_number}: {user_balance + amount} гарм. марок')
 
-			bot.send_message(user_id, f'Банк: спешно получено {amount} марок!\n'
+			bot.send_message(user_id, f'Банк: успешно получено {amount} марок!\n'
 									  f'Ваш баланс: {user_balance + amount}\n')
+			log.info(f"\nБанк выдал: {amount} \n"
+					 f"Получатель: {user_name}, {bank_number}\n")
 		else:
 			bot.send_message(message.chat.id, 'На счету банка недостаточно денег. Для перевода - напечатайте ещё.')
+	else: pass
+
+@bot.message_handler(commands=['логи', 'лог', 'л', 'Логи', 'Лог'])
+def logs_list(message):
+	msg = message.text
+	date = msg.split()[1]
+	get_user = message.from_user
+	user_id = get_user.id
+	if user_id == banker:
+		doc_file = open(f'D:\.Working\Programming\GarmoniaBank_bot\\transfer_history\\{date}.log')
+		bot.send_document(message.chat.id, doc_file)
 	else: pass
 
 @bot.message_handler(commands=['помощьб', 'Помощьб', 'пб'])
@@ -214,7 +247,9 @@ def help_list(message):
 										  ' • /печатать, /п [кол-во денег] - напечатать деньги\n'
 										  ' • /сжечь, /с [кол-во денег] - сжечь деньги\n'
 										  ' • /помощьб, /пб - помощь для банкира\n'
-										  ' • /дать, /д - дать деньги участнику')
+										  ' • /дать, /д - дать деньги участнику\n'
+										  ' • /логи, /лог, /л [Дата формата год-месяц-день, например: 2023-07-16]'
+										  ' - просмотреть историю операций всех пользователей за этот день')
 	else: pass
 
 @bot.message_handler(commands=['помощь', 'Помощь'])
@@ -225,4 +260,4 @@ def help_list(message):
 									  ' • /перевести, /пер [количество] [банковский номер получателя]\n'
 									  ' • /вернуть, /в [количество] - вернуть деньги банку')
 
-bot.infinity_polling()
+bot.infinity_polling(logger_level=None)
