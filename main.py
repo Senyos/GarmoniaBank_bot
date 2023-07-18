@@ -237,7 +237,7 @@ def logs_list(message):
 	else: pass
 
 @bot.message_handler(commands=['помощьб', 'Помощьб', 'пб'])
-def help_list(message):
+def help_list_of_banker(message):
 	get_user = message.from_user
 	user_id = str(get_user.id)
 	msg = message.text
